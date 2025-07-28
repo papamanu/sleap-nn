@@ -152,26 +152,27 @@ def check_cache_memory(train_labels, val_labels, config: DictConfig):
         return False
     return True
 
-def rotating_calipers(points):
+def rotating_calipers(points: torch.Tensor):
     """
     Computes the convex hull of a set of points using the rotating calipers method.
     
     Args:
-        points (np.ndarray): An array of shape (N, 2) representing the points.
-        
+        points (torch.Tensor): (N, 2) tensor of 2D coordinates.
+
     Returns:
-        np.ndarray: Indices of the points that form the convex hull.
+        torch.Tensor: (4, 2) tensor of the minimum-area bounding box corners.
+
     """
     
-    # Remove NaN values and check if there are enough valid points
-    valid_points = points[~np.isnan(points).any(axis=1)]
+     # Remove NaN values and check if there are enough valid points
+    valid_points = points[~torch.isnan(points).any(dim=1)]
         
     
     # Determine the convex hull using scipy's ConvexHull
     hull = ConvexHull(valid_points)
     hull_points = valid_points[hull.vertices]
 
-    min_area = np.inf #intialize minimum area to infinity
+    min_area = float('inf') #intialize minimum area to infinity
     best_box = None #to store the best bounding box found
 
     # Iterate through each edge of the convex hull
@@ -181,29 +182,37 @@ def rotating_calipers(points):
 
         # Compute the angle of the edge
         edge = p2 - p1
-        angle = -np.arctan2(edge[1], edge[0])
+        angle = -torch.atan2(edge[1], edge[0])
 
-        # Rotate points to align with the edge
-        rotation_matrix = np.array([[np.cos(angle), -np.sin(angle)],
-                                     [np.sin(angle),  np.cos(angle)]])
-        rotated_points = (hull_points - p1) @ rotation_matrix.T
+        # Build rotation matrix
+        cos_a = torch.cos(angle)
+        sin_a = torch.sin(angle)
+        R = torch.stack([
+            torch.stack([cos_a, -sin_a]),
+            torch.stack([sin_a,  cos_a])
+        ])  # shape: (2, 2)
+
+        # Rotate points
+        rotated = (hull_points - p1) @ R.T
 
         # Compute the bounding box of the rotated points
-        xmin = np.min(rotated_points[:, 0])
-        xmax = np.max(rotated_points[:, 0])
-        ymin = np.min(rotated_points[:, 1])
-        ymax = np.max(rotated_points[:, 1])
+        xmin = torch.min(rotated[:, 0])
+        xmax = torch.max(rotated[:, 0])
+        ymin = torch.min(rotated[:, 1])
+        ymax = torch.max(rotated[:, 1])
         area = (xmax - xmin) * (ymax - ymin)
 
         # Update the best bounding box if the area is smaller
         if area < min_area:
             min_area = area
             #rectangle corners in rotated coordinates
-            box = np.array([[xmin, ymin],
-                            [xmax, ymin],
-                            [xmax, ymax],
-                            [xmin, ymax]])
+            box = torch.tensor([
+                [xmin, ymin],
+                [xmax, ymin],
+                [xmax, ymax],
+                [xmin, ymax]
+            ])
             #rotate back to original coordinates
-            best_box = (box @ rotation_matrix) + p1
+            best_box = (box @ R) + p1
 
     return best_box

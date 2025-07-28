@@ -136,20 +136,21 @@ def get_cropped_img(image: torch.Tensor, instance: torch.Tensor, head_idx: int):
     #ensure dtype
     image = image.float()
     device = image.device
+    instance = instance.to(device)
 
     #Get OBB from keypoints
-    obb_coords = rotating_calipers(instance.cpu().numpy())
+    obb_coords = rotating_calipers(instance)
 
-    # Find the longest edge and roll so it's [0] -> [1]
-    dists = [np.linalg.norm(obb_coords[i] - obb_coords[(i + 1) % 4]) for i in range(4)]
-    max_index = np.argmax(dists)
-    obb_coords = np.roll(obb_coords, max_index, axis=0)
+    # Find longest edge and roll OBB
+    dists = torch.norm(obb_coords - torch.roll(obb_coords, shifts=-1, dims=0), dim=1)
+    max_index = torch.argmax(dists)
+    obb_coords = torch.roll(obb_coords, shifts=max_index.item(), dims=0)
 
     #Compute padded OBB by expanding each corner outward from center
-    center = np.mean(obb_coords, axis= 0)
+    center = obb_coords.mean(dim=0, keepdims=True)
     vecs = obb_coords - center
-    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
-    norms[norms == 0] = 1  # avoid division by zero
+    norms = torch.norm(vecs, dim=1).unsqueeze(1)  # shape: (4, 1)
+    norms = torch.where(norms == 0, torch.ones_like(norms), norms) # avoid division by zero
     padded_obb = obb_coords + pad * (vecs / norms)  # shape: (4, 2)
     
    # Find the OBB edge closest to the x-axis (smallest absolute angle)
@@ -157,44 +158,46 @@ def get_cropped_img(image: torch.Tensor, instance: torch.Tensor, head_idx: int):
     min_abs_angle = float('inf')
     for i in range(4):
         edge = obb_coords[(i+1)%4] - obb_coords[i]
-        angle = np.arctan2(edge[1], edge[0])
+        angle = torch.atan2(edge[1], edge[0])
         if abs(angle) < min_abs_angle:
             min_abs_angle = abs(angle)
             best_idx = i
 
     # Roll so this edge is [0] -> [1]
-    obb_coords = np.roll(obb_coords, -best_idx, axis=0)
+    obb_coords = torch.roll(obb_coords, shifts=-best_idx, dims=0)
     edge = obb_coords[1] - obb_coords[0]
-    angle = np.arctan2(edge[1], edge[0])
+    angle = torch.atan2(edge[1], edge[0])
 
     # If the edge points left, reverse the OBB
     if edge[0] < 0:
         obb_coords = obb_coords[::-1]
         edge = obb_coords[1] - obb_coords[0]
-        angle = np.arctan2(edge[1], edge[0])
+        angle = torch.atan2(edge[1], edge[0])
 
     #Defining the width/height based on the obb coordinates
-    width = np.linalg.norm(obb_coords[1] - obb_coords[0])
-    height = np.linalg.norm(obb_coords[3] - obb_coords[0])
+    width = torch.norm(obb_coords[1] - obb_coords[0])
+    height = torch.norm(obb_coords[3] - obb_coords[0])
 
     # If the crop is taller than wide, rotate OBB by 90 deg to make it horizontal
     if height > width:
-        obb_coords = np.roll(obb_coords, -1, axis=0)
+        obb_coords = torch.roll(obb_coords, shifts=-1, dims=0)  # rotate OBB 90 degrees
         edge = obb_coords[1] - obb_coords[0]
-        angle = np.arctan2(edge[1], edge[0])
+        angle = torch.atan2(edge[1], edge[0])
         if edge[0] < 0:
-            obb_coords = obb_coords[::-1]
+            obb_coords = torch.flip(obb_coords, dims=[0])
             edge = obb_coords[1] - obb_coords[0]
-            angle = np.arctan2(edge[1], edge[0])
-        width = np.linalg.norm(obb_coords[1] - obb_coords[0])
-        height = np.linalg.norm(obb_coords[3] - obb_coords[0])
+            angle = torch.atan2(edge[1], edge[0])
+        width = torch.norm(obb_coords[1] - obb_coords[0])
+        height = torch.norm(obb_coords[3] - obb_coords[0])
 
     #Add padding to the final crop dimensions
     width += pad*2
     height += pad*2
 
     #Build affine from OBB -> crop box
-    src_pts = torch.tensor(obb_coords[:3], dtype=torch.float32, device=device)
+    src_pts = obb_coords[:3].clone().to(dtype=torch.float32, device=device)  #using corners of OBB
+
+    #rectangular region we want to map the OBB onto
     dst_pts = torch.tensor([
     [pad, pad],
     [width - pad, pad],
@@ -202,10 +205,11 @@ def get_cropped_img(image: torch.Tensor, instance: torch.Tensor, head_idx: int):
     ], dtype=torch.float32, device=device)
 
 
-    ones = torch.ones((3,1), device=device)
-    src = torch.cat([src_pts, ones], dim=1)
+    ones = torch.ones((3,1), device=device) 
+    src = torch.cat([src_pts, ones], dim=1) #appending 1s to the source points to compute affine transformation
 
-    affine_matrix = torch.linalg.lstsq(src, dst_pts).solution.T
+    #solves least squares system giving the affine that best maps src_pts -> dst_pts
+    affine_matrix = torch.linalg.lstsq(src, dst_pts).solution.T 
 
     #Warp the image with the affine transform
     cropped_image = kornia.geometry.transform.warp_affine(image.unsqueeze(0), affine_matrix.unsqueeze(0), 
@@ -229,7 +233,7 @@ def get_cropped_img(image: torch.Tensor, instance: torch.Tensor, head_idx: int):
 
         adjusted_kpts[:, 0] = cropped_image.shape[2] - adjusted_kpts[:, 0]
         adjusted_kpts[:, 1] = cropped_image.shape[1] - adjusted_kpts[:, 1]
-      
+
     return cropped_image, adjusted_kpts, src_pts, dst_pts, rotated
 
 def generate_crops(

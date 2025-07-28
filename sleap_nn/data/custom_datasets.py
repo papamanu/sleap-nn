@@ -15,7 +15,7 @@ from torch.utils.data import Dataset, DataLoader, DistributedSampler
 import sleap_io as sio
 from sleap_nn.config.utils import get_backbone_type_from_cfg, get_model_type_from_cfg
 from sleap_nn.data.instance_centroids import generate_centroids
-from sleap_nn.data.instance_cropping import generate_crops
+from sleap_nn.data.instance_cropping import generate_crops, find_instance_crop_size
 from sleap_nn.data.normalization import (
     apply_normalization,
     convert_to_grayscale,
@@ -451,6 +451,7 @@ class CenteredInstanceDataset(BaseDataset):
         self.confmap_head_config = confmap_head_config
         self.instance_idx_list = self._get_instance_idx_list()
         self.cache_lf = [None, None]
+        self.max_crop_size = find_instance_crop_size(self.labels, maximum_stride=self.max_stride)
 
     def _get_instance_idx_list(self) -> List[Tuple[int]]:
         """Return list of tuples with indices of labelled frames and instances."""
@@ -543,43 +544,35 @@ class CenteredInstanceDataset(BaseDataset):
             scale=self.scale,
         )
 
-        # get the centroids based on the anchor idx
-        # centroids = generate_centroids(instances, anchor_ind=self.anchor_ind)
-
-        # instance, centroid = instances[0], centroids[0]  # (n_samples=1)
-
         instance = instances[0] #(n_samples=1)
 
-        # crop_size = np.array(self.crop_hw) * np.sqrt(
-        #     2
-        # )  # crop extra for rotation augmentation
-        # crop_size = crop_size.astype(np.int32).tolist()
-
-        # sample = generate_crops(image, instance, centroid, crop_size)
         sample = {}
 
-        #Grab skeleton node names from 1st label's skeleton
-        node_names = self.labels[labels_idx].skeletons[0].node_names
+        #Get the head index
+        head_idx = self.anchor_ind
 
-        #getting either the head or nose index
-        if "head" in node_names:
-            head_idx = node_names.index("head") #getting index of "head" node
-        elif "nose" in node_names:
-            head_idx = node_names.index("nose") #some don't have a "head" node but have a "nose"
-        else:
-            head_idx = node_names.index("snout") #alternative if neither head/nose is in the node name list 
+        #Determine if the instance has enough valid points
+        valid_points = instance[~torch.isnan(instance).any(dim=1)]
+        if valid_points.shape[0] < 3:
+            return self.__getitem__((index + 1) % len(self))  # safely retry next sample
 
-        
+        #Crop the sample image
         sample_image, sample_instance, src_pts, dst_pts, rotated = get_cropped_img(image[0], instance, head_idx)
         sample_image, sample_instance = sample_image.unsqueeze(0), sample_instance.unsqueeze(0)
 
+        #Populating dictionary
         sample["instance_image"] = sample_image
         sample["instance"] = sample_instance
-
+        sample["src_pts"] = src_pts.unsqueeze(0)
+        sample ["dst_pts"] = dst_pts.unsqueeze(0)
+        sample["rotated"] = torch.tensor([rotated], dtype=torch.bool)
         sample["frame_idx"] = torch.tensor(lf.frame_idx, dtype=torch.int32)
         sample["video_idx"] = torch.tensor(video_idx, dtype=torch.int32)
         sample["num_instances"] = num_instances
         sample["orig_size"] = torch.Tensor([orig_img_height, orig_img_width])
+        height, width = sample_image.shape[-2:]
+        sample["height"] = [height]
+        sample["width"] = [width]
 
         # apply augmentation
         if self.apply_aug and self.augmentation_config is not None:
@@ -605,16 +598,14 @@ class CenteredInstanceDataset(BaseDataset):
 
         # size matcher
         sample_image, eff_scale = apply_sizematcher(
-            sample_image,
-            max_height=self.max_hw[0],
-            max_width=self.max_hw[1],
+           sample["instance_image"],
+            max_height= self.max_crop_size,
+            max_width= self.max_crop_size,
         )
-        sample_instance = sample_instance * eff_scale
-
-        # Pad the image (if needed) according max stride
-        sample["instance_image"] = apply_pad_to_stride(
-            sample["instance_image"], max_stride=self.max_stride
-        )
+        sample_instance = sample["instance"] * eff_scale
+        sample["instance"] = sample_instance
+        sample["instance_image"] = sample_image
+        sample["scale"] = torch.tensor(eff_scale, dtype=torch.float32).unsqueeze(dim=0) 
 
         img_hw = sample["instance_image"].shape[-2:]
 
