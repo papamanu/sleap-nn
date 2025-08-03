@@ -384,6 +384,14 @@ class ModelTrainer:
                 os.environ["WANDB_MODE"] = "offline"
             else:
                 wandb.login(key=self.config.trainer_config.wandb.api_key)
+            wandb.init(
+                    dir=self.config.trainer_config.save_ckpt_path,
+                    project=self.config.trainer_config.wandb.project,
+                    entity=self.config.trainer_config.wandb.entity,
+                    name=self.config.trainer_config.wandb.name,
+                    id=self.config.trainer_config.wandb.prv_runid,
+                    group=self.config.trainer_config.wandb.group,
+                )        
             wandb_logger = WandbLogger(
                 entity=wandb_config.entity,
                 project=wandb_config.project,
@@ -574,7 +582,14 @@ class ModelTrainer:
         ):  # save config if there are no distributed process
 
             if self.config.trainer_config.use_wandb:
-                wandb.init(dir=self.config.trainer_config.save_ckpt_path)
+                # wandb.init(
+                #     dir=self.config.trainer_config.save_ckpt_path,
+                #     project=self.config.trainer_config.wandb.project,
+                #     entity=self.config.trainer_config.wandb.entity,
+                #     name=self.config.trainer_config.wandb.name,
+                #     id=self.config.trainer_config.wandb.prv_runid,
+                #     group=self.config.trainer_config.wandb.group,
+                # )                
                 self.config.trainer_config.wandb.current_run_id = wandb.run.id
                 wandb.config["run_name"] = self.config.trainer_config.wandb.name
                 wandb.config["run_config"] = OmegaConf.to_container(

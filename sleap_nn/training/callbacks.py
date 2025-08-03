@@ -82,55 +82,58 @@ class WandBPredImageLogger(Callback):
         # Callback initialization
         super().__init__()
 
-    def on_train_epoch_end(self, trainer, pl_module):
+    def on_train_epoch_start(self, trainer, pl_module):
         """Called at the end of each epoch."""
-        epoch_num = trainer.current_epoch
-        train_img_path = (
-            Path(self.viz_folder) / f"train.{epoch_num:04d}.png"
-        ).as_posix()
-        val_img_path = (
-            Path(self.viz_folder) / f"validation.{epoch_num:04d}.png"
-        ).as_posix()
-        train_img = Image.open(train_img_path)
-        val_img = Image.open(val_img_path)
+        if trainer.current_epoch == 0:
+            pass
+        else:
+            epoch_num = trainer.current_epoch - 1
+            train_img_path = (
+                Path(self.viz_folder) / f"train.{epoch_num:04d}.png"
+            ).as_posix()
+            val_img_path = (
+                Path(self.viz_folder) / f"validation.{epoch_num:04d}.png"
+            ).as_posix()
+            train_img = Image.open(train_img_path)
+            val_img = Image.open(val_img_path)
 
-        column_names = ["Run name", "Epoch", "Preds on train", "Preds on validation"]
-        data = [
-            [
-                f"{self.wandb_run_name}",
-                f"{epoch_num}",
-                wandb.Image(train_img),
-                wandb.Image(val_img),
-            ]
-        ]
-        if self.is_bottomup:
-            column_names.extend(["Pafs Preds on train", "Pafs Preds on validation"])
+            column_names = ["Run name", "Epoch", "Preds on train", "Preds on validation"]
             data = [
                 [
                     f"{self.wandb_run_name}",
                     f"{epoch_num}",
                     wandb.Image(train_img),
                     wandb.Image(val_img),
-                    wandb.Image(
-                        Image.open(
-                            (
-                                Path(self.viz_folder)
-                                / f"train.pafs_magnitude.{epoch_num:04d}.png"
-                            ).as_posix()
-                        )
-                    ),
-                    wandb.Image(
-                        Image.open(
-                            (
-                                Path(self.viz_folder)
-                                / f"validation.pafs_magnitude.{epoch_num:04d}.png"
-                            ).as_posix()
-                        )
-                    ),
                 ]
             ]
-        table = wandb.Table(columns=column_names, data=data)
-        wandb.log({f"{self.wandb_run_name}": table})
+            if self.is_bottomup:
+                column_names.extend(["Pafs Preds on train", "Pafs Preds on validation"])
+                data = [
+                    [
+                        f"{self.wandb_run_name}",
+                        f"{epoch_num}",
+                        wandb.Image(train_img),
+                        wandb.Image(val_img),
+                        wandb.Image(
+                            Image.open(
+                                (
+                                    Path(self.viz_folder)
+                                    / f"train.pafs_magnitude.{epoch_num:04d}.png"
+                                ).as_posix()
+                            )
+                        ),
+                        wandb.Image(
+                            Image.open(
+                                (
+                                    Path(self.viz_folder)
+                                    / f"validation.pafs_magnitude.{epoch_num:04d}.png"
+                                ).as_posix()
+                            )
+                        ),
+                    ]
+                ]
+            table = wandb.Table(columns=column_names, data=data)
+            wandb.log({f"{self.wandb_run_name}": table})
 
 
 class MatplotlibSaver(Callback):

@@ -414,7 +414,7 @@ class CenteredInstanceDataset(BaseDataset):
     def __init__(
         self,
         labels: List[sio.Labels],
-        #crop_hw: Tuple[int],
+        crop_hw: Tuple[int],
         confmap_head_config: DictConfig,
         max_stride: int,
         anchor_ind: Optional[int] = None,
@@ -446,12 +446,11 @@ class CenteredInstanceDataset(BaseDataset):
             use_existing_imgs=use_existing_imgs,
             rank=rank,
         )
-        #self.crop_hw = crop_hw
+        self.crop_hw = crop_hw
         self.anchor_ind = anchor_ind
         self.confmap_head_config = confmap_head_config
         self.instance_idx_list = self._get_instance_idx_list()
         self.cache_lf = [None, None]
-        self.max_crop_size = find_instance_crop_size(self.labels, maximum_stride=self.max_stride)
 
     def _get_instance_idx_list(self) -> List[Tuple[int]]:
         """Return list of tuples with indices of labelled frames and instances."""
@@ -599,8 +598,8 @@ class CenteredInstanceDataset(BaseDataset):
         # size matcher
         sample_image, eff_scale = apply_sizematcher(
            sample["instance_image"],
-            max_height= self.max_crop_size,
-            max_width= self.max_crop_size,
+            max_height= self.crop_hw,
+            max_width= self.crop_hw,
         )
         sample_instance = sample["instance"] * eff_scale
         sample["instance"] = sample_instance
@@ -1156,7 +1155,9 @@ def get_train_val_datasets(
             augmentation_config=config.data_config.augmentation_config,
             scale=config.data_config.preprocessing.scale,
             apply_aug=config.data_config.use_augmentations_train,
-            # crop_hw=list(config.data_config.preprocessing.crop_hw),
+            crop_hw= find_instance_crop_size(train_labels, maximum_stride=config.model_config.backbone_config[f"{backbone_type}"][
+                "max_stride"
+            ]),
             max_hw=(
                 config.data_config.preprocessing.max_height,
                 config.data_config.preprocessing.max_width,
@@ -1179,7 +1180,7 @@ def get_train_val_datasets(
             augmentation_config=None,
             scale=config.data_config.preprocessing.scale,
             apply_aug=False,
-            # crop_hw=list(config.data_config.preprocessing.crop_hw),
+            crop_hw= train_dataset.crop_hw,
             max_hw=(
                 config.data_config.preprocessing.max_height,
                 config.data_config.preprocessing.max_width,

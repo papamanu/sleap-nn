@@ -2008,7 +2008,7 @@ def run_inference(
     if make_labels:
         if output_path is None:
             output_path = Path(data_path).with_suffix(".predictions.slp")
-        output.save(Path(output_path).as_posix())
+        output.save(Path(output_path).as_posix(), restore_original_videos=False)
     finish_timestamp = str(datetime.now())
     logger.info(f"Predictions output path: {output_path}")
     logger.info("Saved file at:", finish_timestamp)

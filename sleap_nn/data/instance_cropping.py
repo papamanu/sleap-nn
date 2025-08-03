@@ -151,8 +151,7 @@ def get_cropped_img(image: torch.Tensor, instance: torch.Tensor, head_idx: int):
     vecs = obb_coords - center
     norms = torch.norm(vecs, dim=1).unsqueeze(1)  # shape: (4, 1)
     norms = torch.where(norms == 0, torch.ones_like(norms), norms) # avoid division by zero
-    padded_obb = obb_coords + pad * (vecs / norms)  # shape: (4, 2)
-    
+        
    # Find the OBB edge closest to the x-axis (smallest absolute angle)
     best_idx = 0
     min_abs_angle = float('inf')
