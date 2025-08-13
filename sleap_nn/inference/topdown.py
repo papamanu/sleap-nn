@@ -135,6 +135,9 @@ class CentroidCrop(L.LightningModule):
                 inst for inst in instances[0]
                 if torch.sum(~torch.isnan(inst).any (dim=1)) >= 3
             ] 
+
+            if len(valid_instances) == 0:
+                continue
             
             for instance in valid_instances:
 
@@ -149,6 +152,8 @@ class CentroidCrop(L.LightningModule):
                 dst_pts_list.append(dst_pts)
                 rotated_flags.append(rotated)
 
+            if len(images_to_resize)==0:
+                continue
 
             for i in range(len(images_to_resize)):
                 #storing height and width for later usage
@@ -220,9 +225,10 @@ class CentroidCrop(L.LightningModule):
         """
         if self.use_gt_centroids:
             batch = inputs["video_idx"].shape[0]
-            centroids = generate_centroids(
-                inputs["instances"], anchor_ind=self.anchor_ind
-            )
+            # centroids = generate_centroids(
+            #     inputs["instances"], anchor_ind=self.anchor_ind
+            # )
+            centroids = torch.ones(batch, 1, inputs["instances"].shape[-3], 2)
             centroid_vals = torch.ones(centroids.shape)[..., 0]
             self.refined_peaks_batched = [x[0] for x in centroids]
             self.peak_vals_batched = [x[0] for x in centroid_vals]
